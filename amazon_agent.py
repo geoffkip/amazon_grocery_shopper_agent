@@ -121,7 +121,7 @@ class AmazonFreshBrowser:
 
 async def planner_node(state: AgentState):
     with st.status("🧠 Planner: Designing Schedule...", expanded=True) as status:
-        llm = ChatGoogleGenerativeAI(model="gemini-2.5-pro", temperature=0, google_api_key=os.getenv("GOOGLE_API_KEY"))
+        llm = ChatGoogleGenerativeAI(model="gemini-2.5-pro", temperature=2.0, google_api_key=os.getenv("GOOGLE_API_KEY"))
         
         prompt = ChatPromptTemplate.from_messages([
             ("system", """You are a meal planning expert. Analyze the request.
@@ -258,7 +258,7 @@ browser_tool = st.session_state.browser_tool
 # 4. STREAMLIT UI
 # ==========================================
 
-st.set_page_config(page_title="Amazon Fresh Agent", page_icon="🥕", layout="wide")
+st.set_page_config(page_title="Amazon Fresh Fetch AI Agent", page_icon="🥕", layout="wide")
 
 # --- UPDATED CSS FOR BETTER READABILITY ---
 st.markdown("""
@@ -305,7 +305,7 @@ with st.sidebar:
         st.session_state.clear()
         st.rerun()
 
-st.title("🥕 Amazon Fresh AI Agent")
+st.title("🥕 Amazon Fresh Fetch AI Agent")
 
 default_prompt = """You are a meal planning expert. Help me build a weekly meal plan for dinner and lunch- I need healthy meals on the table in 30 minutes or less. I’d like it to be a full Monday-Friday meal plan with the links to the recipes and a grocery list included. I’m feeding 2 people, 2 adults. We don't eat pork. I’m accommodating no other allergens or restrictions and try to have a balanced diet focusing that incorporates a variety of whole grains. I'd like it to be heart healthy. I include protein and fresh produce at every meal. We enjoy global flavors like Mexican, Mediterranean, stir fries. I aim for 30 grams of protein at every meal. We usually cook 3 nights a week and use leftovers for lunch or other dinner. One or two lunches can be a sandwich/wrap or salad (something quick as for lunch I typically don't have time. For one meal a week it can be a bit of a longer cooking time. My preferred cooking styles are sheet pan or one saute pan, slow cooker and grilling. I own an Instant Pot and a rice cooker. We would prefer 1-2 vegetarian meals per week. We try to limit red meat to about 1-2 times a week. We eat all other animal products including beef, chicken, tilapia, salmon, cod, shrimp and lamb. Please have the plan include a variety of proteins - so one night chicken, one night beef. We want to include premium cuts while also incorporating budget-friendly staples and limiting specialty ingredients. My preferred grocery stores are amazon fresh, also, food lion, harris teeters and Wegmans. I'd also like you to include breakfast - we typically eat yogurt with whole grain toast or English muffins with peanut butter, jam, avocado and cheese. Some days we also make eggs and some days I sometimes make muffins. Feel free to suggest other healthy breakfast options. Avoiding sugar crashes is also important to me."""
 
