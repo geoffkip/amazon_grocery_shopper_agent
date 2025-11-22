@@ -38,7 +38,7 @@ User Input → Planner → Extractor → Shopper → Human Review → Checkout
 2. **Extractor Node**: Extracts shopping list items, excluding pantry items
 3. **Shopper Node**: Searches Amazon Fresh and adds items to cart with budget tracking
 4. **Human Review Node**: Pauses for user approval before checkout
-5. **Checkout Node**: Finalizes the order
+5. **Checkout Node**: Navigates to the cart and clicks "Check out Fresh Cart," then terminates to allow manual user completion.
 
 ## 🚀 Getting Started
 
@@ -123,10 +123,10 @@ The agent will:
 
 ### 5. Final Review
 
-- Review cart contents and total cost
-- Check missing/unavailable items
-- Set delivery window
-- Place order or cancel
+- Proceed to Cart Checkout
+- Switches to manual user handout mode
+- Review missing items, substitution items, select payment and delivery time
+- Place final order and confirm
 
 ## 🛠️ Technology Stack
 
