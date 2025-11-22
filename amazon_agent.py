@@ -7,6 +7,7 @@ import pandas as pd
 from dotenv import load_dotenv
 from typing import List, TypedDict, Annotated
 from operator import add
+from fpdf import FPDF
 
 # LangChain / LangGraph imports
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -145,23 +146,100 @@ class AmazonFreshBrowser:
         if self.playwright: await self.playwright.stop()
 
 # ==========================================
-# 2. DEFINE NODES
+# 2. PDF GENERATOR CLASS
+# ==========================================
+
+class MealPlanPDF(FPDF):
+    def header(self):
+        self.set_font('Arial', 'B', 16)
+        self.cell(0, 10, 'Amazon Fresh Fetch - Weekly Meal Plan', 0, 1, 'C')
+        self.ln(5)
+
+    def footer(self):
+        self.set_y(-15)
+        self.set_font('Arial', 'I', 8)
+        self.cell(0, 10, f'Page {self.page_no()}', 0, 0, 'C')
+
+    def clean_text(self, text):
+        if not text: return ""
+        return text.encode('latin-1', 'replace').decode('latin-1')
+
+def generate_pdf(meal_json_str: str, shopping_list: List[str]) -> bytes:
+    pdf = MealPlanPDF()
+    pdf.add_page()
+    
+    # Shopping List
+    pdf.set_font('Arial', 'B', 14)
+    pdf.cell(0, 10, 'Master Shopping List', 0, 1, 'L')
+    pdf.set_font('Arial', '', 10)
+    
+    col_width = 90
+    for i in range(0, len(shopping_list), 2):
+        item1 = shopping_list[i]
+        item2 = shopping_list[i+1] if i+1 < len(shopping_list) else ""
+        pdf.cell(col_width, 7, f"[ ] {pdf.clean_text(item1)}", 0, 0)
+        if item2:
+            pdf.cell(col_width, 7, f"[ ] {pdf.clean_text(item2)}", 0, 1)
+        else:
+            pdf.ln(7)
+    
+    pdf.ln(10)
+
+    # Recipes
+    try:
+        data = json.loads(meal_json_str)
+        schedule = data.get("schedule", [])
+        
+        for day in schedule:
+            pdf.add_page()
+            pdf.set_font('Arial', 'B', 20)
+            pdf.set_text_color(255, 75, 75)
+            pdf.cell(0, 15, pdf.clean_text(day['day']), 0, 1, 'L')
+            pdf.set_text_color(0, 0, 0)
+            
+            for meal_type in ['breakfast', 'lunch', 'dinner']:
+                meal_data = day.get(meal_type)
+                if isinstance(meal_data, dict):
+                    pdf.set_font('Arial', 'B', 14)
+                    pdf.set_fill_color(240, 240, 240)
+                    pdf.cell(0, 10, f"{meal_type.title()}: {pdf.clean_text(meal_data.get('title', ''))}", 0, 1, 'L', fill=True)
+                    
+                    pdf.set_font('Arial', 'I', 10)
+                    pdf.multi_cell(0, 5, f"Ingredients: {pdf.clean_text(meal_data.get('ingredients', ''))}")
+                    pdf.ln(2)
+                    
+                    pdf.set_font('Arial', '', 11)
+                    pdf.multi_cell(0, 6, pdf.clean_text(meal_data.get('instructions', '')))
+                    pdf.ln(8)
+                else:
+                    pdf.set_font('Arial', 'B', 12)
+                    pdf.cell(0, 10, f"{meal_type.title()}: {pdf.clean_text(str(meal_data))}", 0, 1)
+
+    except Exception as e:
+        pdf.set_font('Arial', 'B', 12)
+        pdf.cell(0, 10, f"Error parsing recipe data: {str(e)}", 0, 1)
+
+    return pdf.output(dest='S').encode('latin-1')
+
+# ==========================================
+# 3. DEFINE NODES
 # ==========================================
 
 async def planner_node(state: AgentState):
     with st.status("🧠 Planner: Designing Schedule...", expanded=True) as status:
-        llm = ChatGoogleGenerativeAI(model="gemini-2.5-pro", temperature=0.7, google_api_key=os.getenv("GOOGLE_API_KEY"))
+        llm = ChatGoogleGenerativeAI(model="gemini-2.5-pro", temperature=1.0, google_api_key=os.getenv("GOOGLE_API_KEY"))
         
-        # --- MEAL PLAN PROMPT ---
+        # --- CLEANED PROMPT (No Delivery Window request) ---
         prompt = ChatPromptTemplate.from_messages([
-            ("system", """You are a meal planning expert. Analyze the request.
-            Return a VALID JSON object with exactly ONE key:
-            1. "schedule": (array of objects). Each object must have:
-               - "day": "Monday", "Tuesday", etc.
-               - "breakfast": "Meal Name"
-               - "lunch": "Meal Name"
-               - "dinner": "Meal Name"
-               - "ingredients_summary": "Brief list of main ingredients"
+            ("system", """You are a professional chef and nutritionist. 
+            Create a JSON object with exactly ONE key: "schedule".
+            The "schedule" is an array of objects. Each object represents a DAY and must have:
+            - "day": "Monday", "Tuesday", etc.
+            - "breakfast": {{ "title": "Name", "ingredients": "List of items", "instructions": "Step-by-step cooking guide" }}
+            - "lunch": {{ "title": "Name", "ingredients": "List of items", "instructions": "Step-by-step cooking guide" }}
+            - "dinner": {{ "title": "Name", "ingredients": "List of items", "instructions": "Step-by-step cooking guide" }}
+            
+            Ensure the instructions are concise but actionable.
             """),
             ("human", "{input}")
         ])
@@ -171,14 +249,12 @@ async def planner_node(state: AgentState):
         
         try:
             content = re.sub(r"^```json|```$", "", response.content.strip(), flags=re.MULTILINE).strip()
-            json.loads(content)
+            json.loads(content) 
             plan_json_str = content
         except:
-            plan_json_str = json.dumps({
-                "schedule": [{"day": "Error", "breakfast": "Error", "lunch": "Error", "dinner": response.content}]
-            })
+            plan_json_str = json.dumps({"schedule": []})
         
-        status.write("Plan created.")
+        status.write("Plan & Recipes created.")
     
     return {"meal_plan_json": plan_json_str, "total_cost": 0.0}
 
@@ -186,7 +262,7 @@ async def extractor_node(state: AgentState):
     with st.status("📑 Extractor: Building Shopping List...", expanded=True) as status:
         llm = ChatGoogleGenerativeAI(model="gemini-2.5-pro", temperature=0, google_api_key=os.getenv("GOOGLE_API_KEY"))
         prompt = ChatPromptTemplate.from_messages([
-            ("system", "Read meal plan JSON. Compare against PANTRY: {pantry}. Return SPECIFIC comma-separated list."),
+            ("system", "Read the meal plan JSON. Compare against PANTRY: {pantry}. Return SPECIFIC comma-separated list of ingredients needed for all meals."),
             ("human", "{input}")
         ])
         chain = prompt | llm
@@ -245,7 +321,7 @@ async def checkout_node(state: AgentState):
     return {"messages": [SystemMessage(content="Checkout Handoff Complete.")]}
 
 # ==========================================
-# 3. GRAPH INIT
+# 4. GRAPH INIT
 # ==========================================
 
 if 'graph_app' not in st.session_state:
@@ -273,7 +349,7 @@ app = st.session_state.graph_app
 browser_tool = st.session_state.browser_tool
 
 # ==========================================
-# 4. STREAMLIT UI
+# 5. STREAMLIT UI
 # ==========================================
 
 st.set_page_config(page_title="Amazon Fresh Fetch AI Agent", page_icon="🥕", layout="wide")
@@ -283,8 +359,7 @@ st.markdown("""
     .meal-card {
         background-color: #ffffff; border: 1px solid #e0e0e0; border-radius: 10px;
         padding: 20px; margin-bottom: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.05);
-        border-left: 8px solid #ff4b4b;
-        height: 100%;
+        border-left: 8px solid #ff4b4b; height: 100%;
     }
     .meal-header { font-size: 1.2rem; font-weight: 700; color: #1f1f1f; margin-bottom: 8px; display: flex; align-items: center; }
     .meal-body { font-size: 1rem; color: #4f4f4f; line-height: 1.5; }
@@ -295,7 +370,8 @@ st.markdown("""
 with st.sidebar:
     st.header("⚙️ Settings")
     budget = st.number_input("Weekly Budget ($)", value=200.0, step=10.0)
-    pantry = st.text_area("In Your Pantry")
+    # --- EMPTY PANTRY DEFAULT ---
+    pantry = st.text_area("In Your Pantry", "")
     st.divider()
     if st.button("Reset Session"):
         st.session_state.clear()
@@ -307,7 +383,7 @@ default_prompt = """You are a world-class nutritionist and meal planning expert.
 
 **CORE CONSTRAINTS:**
 - **Dietary:** No Pork. Heart-healthy. Focus on whole grains and fresh produce.
-- **Nutrition:** Aim for ~30g protein per meal. Avoid sugar crashes (low glycemic index).
+- **Nutrition:** Aim for ~30g protein per meal. Avoid sugar crashes.
 - **Time:** Meals must be on the table in 30 mins or less (except 1 "long cook" meal allowed).
 - **Budget:** Mix premium cuts with budget-friendly staples.
 
@@ -323,18 +399,10 @@ default_prompt = """You are a world-class nutritionist and meal planning expert.
 - **Protein Variety:** Chicken, Beef, Seafood (Tilapia, Salmon, Cod, Shrimp), Lamb.
 - **Vegetarian:** Include 1-2 vegetarian dinners per week.
 - **Red Meat Limit:** Maximum 1-2 times per week.
-
-**OUTPUT FORMAT:**
-Return a VALID JSON object with exactly one key: "schedule".
-The "schedule" value must be an array of objects, where each object represents a day and contains:
-- "day": "Monday", "Tuesday", etc.
-- "breakfast": "Meal Name & Description"
-- "lunch": "Meal Name & Description"
-- "dinner": "Meal Name & Description"
-- "ingredients_summary": "Brief comma-separated list of main ingredients for that day"""
+"""
 
 if "thread_id" not in st.session_state:
-    st.session_state.thread_id = "streamlit_run_clean"
+    st.session_state.thread_id = "streamlit_run_v19"
 
 user_prompt = st.text_area("Meal Prompt", value=default_prompt, height=150)
 
@@ -363,6 +431,7 @@ if current_step == "shopper":
     st.subheader("📅 Weekly Plan & Shopping List")
     
     data = snapshot.values
+    
     try:
         plan_data = json.loads(data['meal_plan_json'])
         schedule = plan_data.get('schedule', [])
@@ -371,24 +440,43 @@ if current_step == "shopper":
             for tab, day_info in zip(tabs, schedule):
                 with tab:
                     col_a, col_b, col_c = st.columns(3)
+                    def get_meal_display(meal_data):
+                        if isinstance(meal_data, dict): return meal_data.get('title', 'No Title')
+                        return str(meal_data)
+
                     with col_a:
-                        st.markdown(f"""<div class="meal-card"><div class="meal-header"><span class="icon">🥞</span> Breakfast</div><div class="meal-body">{day_info.get('breakfast', 'No meal')}</div></div>""", unsafe_allow_html=True)
+                        st.markdown(f"""<div class="meal-card"><div class="meal-header"><span class="icon">🥞</span> Breakfast</div><div class="meal-body">{get_meal_display(day_info.get('breakfast'))}</div></div>""", unsafe_allow_html=True)
                     with col_b:
-                        st.markdown(f"""<div class="meal-card"><div class="meal-header"><span class="icon">🥗</span> Lunch</div><div class="meal-body">{day_info.get('lunch', 'No meal')}</div></div>""", unsafe_allow_html=True)
+                        st.markdown(f"""<div class="meal-card"><div class="meal-header"><span class="icon">🥗</span> Lunch</div><div class="meal-body">{get_meal_display(day_info.get('lunch'))}</div></div>""", unsafe_allow_html=True)
                     with col_c:
-                        st.markdown(f"""<div class="meal-card"><div class="meal-header"><span class="icon">🍳</span> Dinner</div><div class="meal-body">{day_info.get('dinner', 'No meal')}</div></div>""", unsafe_allow_html=True)
-                    st.caption(f"**Key Ingredients:** {day_info.get('ingredients_summary', '')}")
-    except:
-        st.warning("Showing raw text (JSON parse failed).")
-        st.write(data['meal_plan_json'])
+                        st.markdown(f"""<div class="meal-card"><div class="meal-header"><span class="icon">🍳</span> Dinner</div><div class="meal-body">{get_meal_display(day_info.get('dinner'))}</div></div>""", unsafe_allow_html=True)
+                    
+                    with st.expander("👨‍🍳 View Instructions"):
+                        st.write(day_info)
+    except Exception as e:
+        st.error(f"Error displaying cards: {e}")
 
     st.divider()
-    st.subheader("🛒 Confirm Ingredients")
+    col_header, col_dl = st.columns([3, 1])
+    with col_header: st.subheader("🛒 Confirm Ingredients")
+    
     raw_list = data.get('shopping_list', [])
     if not raw_list: raw_list = []
     df = pd.DataFrame({"Item": raw_list, "Buy": [True]*len(raw_list)})
     edited_df = st.data_editor(df, num_rows="dynamic", use_container_width=True, column_config={"Buy": st.column_config.CheckboxColumn("Buy?", default=True)})
     final_shopping_list = edited_df[edited_df["Buy"] == True]["Item"].tolist()
+
+    with col_dl:
+        try:
+            pdf_bytes = generate_pdf(data['meal_plan_json'], final_shopping_list)
+            st.download_button(
+                label="📄 Download PDF Plan",
+                data=pdf_bytes,
+                file_name="fresh_fetch_plan.pdf",
+                mime="application/pdf"
+            )
+        except Exception as e:
+            st.error("PDF Gen Failed")
 
     if st.button(f"✅ Shop for {len(final_shopping_list)} Items", type="primary"):
         app.update_state(config, {"shopping_list": final_shopping_list})
@@ -423,7 +511,7 @@ elif current_step == "checkout":
     1. The agent has filled your cart and clicked **"Check out Fresh Cart"**.
     2. Please switch to the opened Chrome window.
     3. You must manually complete:
-        * **Substitutions**
+        * **Upsells / Substitutions**
         * **Payment Method**
         * **Delivery Schedule**
         * **Final "Place Order"**
