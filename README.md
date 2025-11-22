@@ -15,9 +15,10 @@
 
 ## ✨ Features
 
-- 🧠 **AI Meal Planning**: Generate personalized weekly meal plans using Google Gemini 2.5 Flash AI with detailed nutrition analysis
+- 🧠 **AI Meal Planning**: Generate personalized weekly meal plans using Google Gemini 2.5 Pro AI with detailed nutrition analysis
 - 📝 **Smart Shopping Lists**: Automatically extract ingredients from meal plans with quantity consolidation, accounting for pantry items
-- 🤖 **Intelligent Product Selection**: LLM-powered product matching that analyzes top 3 search results to pick the best value/match
+- 🎓 **Preference Learning**: Learns from your shopping history to suggest preferred brands and products you've bought before
+- 🤖 **Intelligent Product Selection**: LLM-powered product matching that analyzes top 3 search results to pick the best value/match with automatic fallback
 - 🛒 **Automated Cart Management**: Seamlessly search and add items to your Amazon Fresh cart with real-time price tracking
 - 💰 **Budget Tracking**: Monitor spending in real-time with configurable budget limits and automatic budget cutoffs
 - 📊 **Nutritional Analysis**: Visual charts showing daily calories, protein, carbs, and fat breakdowns
@@ -38,21 +39,25 @@ User Input → Planner → Extractor → Shopper → Human Review → Checkout
 ### Workflow Nodes
 
 1. **Planner Node**: 
-   - Analyzes user meal preferences using Google Gemini AI
+   - Analyzes user meal preferences using Google Gemini 2.5 Pro AI
    - Generates a structured weekly meal plan with breakfast, lunch, and dinner
    - Includes detailed ingredients with quantities (lbs, oz, cups, count)
    - Calculates daily nutritional information (calories, protein, carbs, fat)
+   - Uses higher temperature (0.7) for creative meal planning
 
 2. **Extractor Node**: 
-   - Parses meal plan JSON to extract all ingredients
+   - Parses meal plan JSON to extract all ingredients using Google Gemini 2.5 Pro
    - Consolidates duplicate items by summing quantities
    - Filters out pantry items that the user already has
-   - Returns a clean, deduplicated shopping list
+   - **Preference Learning**: Analyzes past shopping history to learn brand preferences
+   - Automatically upgrades generic items (e.g., "Peanut Butter") to specific brands you've bought before (e.g., "Smuckers Peanut Butter")
+   - Returns a clean, deduplicated shopping list with improved text cleaning
 
 3. **Shopper Node**: 
    - Searches Amazon Fresh for each item
    - Scrapes top 3 search results with titles and prices
-   - Uses LLM to intelligently select the best match/value from options
+   - Uses Google Gemini 2.5 Flash to intelligently select the best match/value from options
+   - **Smart Fallback**: If AI selection fails, automatically retries with brute-force first-result method
    - Adds selected items to cart with real-time budget tracking
    - Handles missing items and budget cutoffs gracefully
    - Automatically navigates to checkout when complete
@@ -64,7 +69,9 @@ User Input → Planner → Extractor → Shopper → Human Review → Checkout
 
 5. **Checkout Node**: 
    - Navigates to Amazon cart
-   - Clicks "Check out Fresh Cart" button
+   - Attempts multiple checkout button strategies (Fresh Cart, Proceed to checkout, etc.)
+   - Displays comprehensive review with success rate metrics
+   - Shows separate columns for successfully added items vs. missed items
    - Handles checkout initiation, then terminates for manual user completion
 
 ## 🚀 Getting Started
@@ -160,9 +167,10 @@ The agent will:
 
 ### 5. Final Review & Checkout
 
-- View summary of cart items, total cost, and budget status
-- Review any missing or skipped items
-- The browser will automatically navigate to checkout
+- View comprehensive summary with success rate percentage
+- See separate sections for successfully added items vs. missed items
+- Review total cost, budget status, and cart statistics
+- The browser will automatically navigate to checkout with multiple fallback strategies
 - Complete payment, delivery time, and final order confirmation manually in the browser window
 
 ## 🛠️ Technology Stack
@@ -170,7 +178,8 @@ The agent will:
 - **Streamlit**: Web UI framework with interactive components
 - **LangGraph**: Workflow orchestration and state management with checkpoints
 - **LangChain**: LLM integration and prompt management
-- **Google Gemini 2.5 Flash**: AI model for meal planning, ingredient extraction, and product selection
+- **Google Gemini 2.5 Pro**: AI model for meal planning and ingredient extraction (with preference learning)
+- **Google Gemini 2.5 Flash**: AI model for fast product selection during shopping
 - **Playwright**: Browser automation for Amazon Fresh interaction
 - **SQLite**: Local database for meal plan history and settings
 - **FPDF**: PDF generation for meal plan exports
@@ -215,6 +224,10 @@ Set your weekly budget in the Streamlit sidebar. The agent will stop adding item
 
 List items you already have in your pantry. The agent will exclude these from the shopping list.
 
+### Preference Learning
+
+The agent automatically learns from your shopping history stored in the database. When you request a generic item (e.g., "Peanut Butter"), it will suggest the specific brand you've purchased before (e.g., "Smuckers Natural Peanut Butter"). This preference learning improves over time as you create more meal plans.
+
 ## 🐛 Troubleshooting
 
 ### Browser Not Launching
@@ -228,6 +241,7 @@ List items you already have in your pantry. The agent will exclude these from th
 
 ### Items Not Found
 - The agent uses AI to select the best match from search results
+- If AI selection fails, it automatically falls back to adding the first search result
 - Items that can't be matched or exceed budget appear in the "Missing/Skipped" section
 - You can manually add items in the browser window if needed
 
