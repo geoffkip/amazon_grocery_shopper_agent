@@ -45,3 +45,6 @@ Thumbs.db
 
 # Dev Containers
 .devcontainer/
+
+# macOS App Bundle (generated)
+*.app/

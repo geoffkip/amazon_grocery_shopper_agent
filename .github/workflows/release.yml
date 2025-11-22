@@ -26,16 +26,13 @@ jobs:
           cp requirements.txt release/amazon-fresh-fetch/
           cp config.py release/amazon-fresh-fetch/
           
-          # Copy installer scripts
-          cp install.sh release/amazon-fresh-fetch/
-          cp launch.sh release/amazon-fresh-fetch/
-          cp install.bat release/amazon-fresh-fetch/
-          cp launch.bat release/amazon-fresh-fetch/
-          cp README_INSTALLATION.md release/amazon-fresh-fetch/
+          # Copy scripts folder
+          cp -r scripts release/amazon-fresh-fetch/
           
-          # Make scripts executable
-          chmod +x release/amazon-fresh-fetch/install.sh
-          chmod +x release/amazon-fresh-fetch/launch.sh
+          # Create macOS .app bundle
+          cd release/amazon-fresh-fetch/scripts
+          ./create_mac_app.sh
+          cd ../../..
           
           # Create ZIP file
           cd release
@@ -53,15 +50,15 @@ jobs:
             
             1. Download `amazon-fresh-fetch.zip`
             2. Extract the ZIP file
-            3. Follow instructions in `README_INSTALLATION.md`
+            3. Follow instructions in `scripts/README_INSTALLATION.md`
             
-            ### 🍎 macOS/Linux
-            - Run `./install.sh` to install
-            - Run `./launch.sh` to launch the app
+            ### 🍎 macOS
+            - **Easy**: Double-click `scripts/Amazon Fresh Fetch.app` (no terminal needed!)
+            - **Manual**: Run `scripts/install.sh` to install, then `scripts/launch.sh` to launch
             
             ### 🪟 Windows
-            - Double-click `install.bat` to install
-            - Double-click `launch.bat` to launch the app
+            - Double-click `scripts/install.bat` to install
+            - Double-click `scripts/launch.bat` to launch the app
             
             ### 🔑 Requirements
             - Python 3.8 or higher
