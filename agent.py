@@ -16,6 +16,7 @@ from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_google_genai import ChatGoogleGenerativeAI
 
+from config import EXTRACTOR_MODEL, PLANNER_MODEL, SHOPPER_MODEL
 from database import db
 
 
@@ -61,7 +62,7 @@ async def planner_node(state: AgentState):
     ) as status:
         # Gemini 2.5 Pro with higher temperature for a bit of creativity
         llm = ChatGoogleGenerativeAI(
-            model="gemini-2.5-pro",
+            model=PLANNER_MODEL,
             temperature=0.7,
             google_api_key=os.getenv("GOOGLE_API_KEY"),
         )
@@ -113,7 +114,7 @@ async def extractor_node(state: AgentState):
     """
     with st.status("📑 Extractor: Building Shopping List...", expanded=True) as status:
         llm = ChatGoogleGenerativeAI(
-            model="gemini-2.5-pro",
+            model=EXTRACTOR_MODEL,
             temperature=0,
             google_api_key=os.getenv("GOOGLE_API_KEY"),
         )
@@ -174,7 +175,7 @@ async def shopper_node(state: AgentState):
     cart, missing = [], []
     # Gemini Flash for shopping
     llm = ChatGoogleGenerativeAI(
-        model="gemini-2.5-flash",
+        model=SHOPPER_MODEL,
         temperature=0,
         google_api_key=os.getenv("GOOGLE_API_KEY"),
     )

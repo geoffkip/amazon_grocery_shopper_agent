@@ -12,6 +12,8 @@ from typing import Dict, List
 import streamlit as st
 from playwright.async_api import async_playwright
 
+from config import SESSION_FILE
+
 
 class AmazonFreshBrowser:
     """
@@ -31,7 +33,7 @@ class AmazonFreshBrowser:
         self.context = None
         self.page = None
         self.playwright = None
-        self.session_file = "amazon_session.json"
+        self.session_file = SESSION_FILE
 
     async def start(self):
         """

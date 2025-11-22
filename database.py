@@ -9,6 +9,8 @@ import sqlite3
 import json
 from datetime import datetime
 
+from config import DB_NAME
+
 
 class DBManager:
     """
@@ -18,12 +20,12 @@ class DBManager:
         conn (sqlite3.Connection): The database connection object.
     """
 
-    def __init__(self, db_name="agent_data.db"):
+    def __init__(self, db_name=DB_NAME):
         """
         Initialize the DBManager.
 
         Args:
-            db_name (str): The name of the database file. Defaults to "agent_data.db".
+            db_name (str): The name of the database file. Defaults to DB_NAME.
         """
         self.conn = sqlite3.connect(db_name, check_same_thread=False)
         self.create_tables()
