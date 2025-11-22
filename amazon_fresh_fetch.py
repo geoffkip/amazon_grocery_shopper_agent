@@ -8,12 +8,24 @@ review, and checkout handoff.
 
 import asyncio
 import json
+import os
+from pathlib import Path
 
 import pandas as pd
 import streamlit as st
+from dotenv import load_dotenv
 from langchain_core.messages import HumanMessage
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, StateGraph
+
+# Load environment variables from .env file
+load_dotenv()
+
+# Verify API key is loaded
+if not os.getenv("GOOGLE_API_KEY"):
+    st.error("⚠️ GOOGLE_API_KEY not found!")
+    st.info("Please create a .env file with: GOOGLE_API_KEY=your_key_here")
+    st.stop()
 
 from agent import (
     AgentState,
@@ -219,7 +231,7 @@ elif current_step == "shopper":
     df = pd.DataFrame({"Item": raw_list, "Buy": [True] * len(raw_list)})
 
     edited_df = st.data_editor(df, num_rows="dynamic", width="stretch")
-    final_list = edited_df[edited_df["Buy"] is True]["Item"].tolist()
+    final_list = edited_df[edited_df["Buy"] == True]["Item"].tolist()
 
     with c_pdf:
         try:
