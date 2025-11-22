@@ -67,7 +67,6 @@ class DBManager:
         c.execute("SELECT id, date, prompt, plan_json, shopping_list FROM meal_plans ORDER BY id DESC LIMIT ?", (limit,))
         return [{"id": r[0], "date": r[1], "prompt": r[2], "json": r[3], "list": json.loads(r[4])} for r in c.fetchall()]
 
-    # --- DELETE FUNCTION ---
     def delete_all_plans(self):
         c = self.conn.cursor()
         c.execute("DELETE FROM meal_plans")
@@ -123,6 +122,7 @@ class AmazonFreshBrowser:
 
     # --- SMART SHOPPER LOGIC ---
     async def search_and_get_options(self, item_name: str) -> List[Dict]:
+        """Scrapes top 3 results for LLM decision making"""
         try:
             search_box = self.page.locator('input[id="twotabsearchtextbox"]')
             await search_box.clear()
@@ -131,14 +131,17 @@ class AmazonFreshBrowser:
             try: await self.page.wait_for_selector('div[data-component-type="s-search-result"]', timeout=3000)
             except: pass
 
+            # Get first 3 results
             results = await self.page.locator('div[data-component-type="s-search-result"]').all()
             options = []
-            for i, res in enumerate(results[:3]): 
+            
+            for i, res in enumerate(results[:3]): # Top 3 only
                 try:
                     title = await res.locator("h2").first.text_content()
                     price_text = "0.00"
                     if await res.locator(".a-price .a-offscreen").count() > 0:
                         price_text = await res.locator(".a-price .a-offscreen").first.text_content()
+                    
                     options.append({
                         "index": i,
                         "title": title.strip(),
@@ -146,16 +149,21 @@ class AmazonFreshBrowser:
                         "price": float(price_text.replace("$", "").replace(",", "").strip()) if "$" in price_text else 0.0
                     })
                 except: continue
+            
             return options
         except: return []
 
     async def add_specific_item(self, index: int) -> bool:
+        """Clicks 'Add' on the Nth item in the search results"""
         try:
             results = await self.page.locator('div[data-component-type="s-search-result"]').all()
             if index >= len(results): return False
+            
             target = results[index]
+            
             btn = target.get_by_role("button", name="Add to cart")
             if await btn.count() == 0: btn = target.locator("button[name='submit.addToCart']")
+            
             if await btn.count() > 0:
                 await btn.first.click()
                 await asyncio.sleep(1)
@@ -173,6 +181,7 @@ class AmazonFreshBrowser:
             if await fresh_btn.count() > 0:
                 await fresh_btn.click()
                 return True
+            # Fallbacks
             proceed_btn = self.page.locator("input[name='proceedToALMCheckout-QW1hem9uIEZyZXNo']")
             if await proceed_btn.count() > 0:
                 await proceed_btn.click()
@@ -201,6 +210,7 @@ def generate_pdf(meal_json_str: str, shopping_list: List[str]) -> bytes:
     pdf = MealPlanPDF()
     pdf.add_page()
     
+    # Shopping List
     pdf.set_font('Arial', 'B', 14)
     pdf.cell(0, 10, 'Master Shopping List', 0, 1, 'L')
     pdf.set_font('Arial', '', 10)
@@ -213,21 +223,25 @@ def generate_pdf(meal_json_str: str, shopping_list: List[str]) -> bytes:
         else: pdf.ln(7)
     pdf.ln(10)
 
+    # Recipes
     try:
         data = json.loads(meal_json_str)
         schedule = data.get("schedule", [])
         for day in schedule:
             pdf.add_page()
             pdf.set_font('Arial', 'B', 16)
+            # --- RED DAY HEADERS ---
             pdf.set_text_color(255, 75, 75)
             pdf.cell(0, 10, pdf.clean_text(day['day']), 0, 1, 'L')
             pdf.set_text_color(0, 0, 0)
+            
             for meal_type in ['breakfast', 'lunch', 'dinner']:
                 meal_data = day.get(meal_type)
                 if isinstance(meal_data, dict):
                     pdf.set_font('Arial', 'B', 12)
                     pdf.set_fill_color(240, 240, 240)
                     pdf.cell(0, 8, f"{meal_type.title()}: {pdf.clean_text(meal_data.get('title', ''))}", 0, 1, 'L', fill=True)
+                    
                     pdf.set_font('Arial', '', 10)
                     pdf.multi_cell(0, 5, f"Ing: {pdf.clean_text(meal_data.get('ingredients', ''))}")
                     pdf.multi_cell(0, 5, f"Steps: {pdf.clean_text(meal_data.get('instructions', ''))}")
@@ -236,7 +250,7 @@ def generate_pdf(meal_json_str: str, shopping_list: List[str]) -> bytes:
     return pdf.output(dest='S').encode('latin-1')
 
 # ==========================================
-# 4. NODES
+# 4. NODES (Smart + Nutrition)
 # ==========================================
 
 async def planner_node(state: AgentState):
@@ -282,7 +296,7 @@ async def extractor_node(state: AgentState):
             2. Extract the 'ingredients' string from EVERY meal.
             3. Consolidate items by summing up quantities where possible (e.g., "2 eggs" + "2 eggs" = "4 Eggs").
             4. Compare against PANTRY: {pantry}. Remove any matches.
-            5. Return a comma-separated list of items WITH their total quantities.
+            5. STRICT OUTPUT RULE: Return ONLY a comma-separated list of items. Do not speak. Do not add introduction text.
             """),
             ("human", "{input}")
         ])
@@ -314,19 +328,24 @@ async def shopper_node(state: AgentState):
             missing.append(f"{item} (Budget Cut)")
             continue
         
+        # --- SMART SHOPPER LOGIC ---
         options = await browser_tool.search_and_get_options(item)
         
         if not options:
             missing.append(item)
             continue
             
-        choice_prompt = f"User wants '{item}'. Options:\n"
-        for opt in options: choice_prompt += f"Index {opt['index']}: {opt['title']} - ${opt['price_str']}\n"
-        choice_prompt += "Return ONLY the Index integer (0, 1, or 2) of the best match."
+        # Ask LLM to pick best value
+        choice_prompt = f"User wants '{item}'. Available Options:\n"
+        for opt in options:
+            choice_prompt += f"Index {opt['index']}: {opt['title']} - ${opt['price_str']}\n"
+        choice_prompt += "Return ONLY the Index integer (0, 1, or 2) of the best match/value. If none match well, return -1."
         
         decision_msg = await llm.ainvoke([HumanMessage(content=choice_prompt)])
-        try: choice_idx = int(re.search(r'-?\d+', decision_msg.content).group())
-        except: choice_idx = 0
+        try:
+            choice_idx = int(re.search(r'-?\d+', decision_msg.content).group())
+        except:
+            choice_idx = 0 # Default to first if LLM fails
             
         if choice_idx >= 0 and choice_idx < len(options):
             chosen = options[choice_idx]
@@ -334,8 +353,11 @@ async def shopper_node(state: AgentState):
             if success:
                 cart.append(f"{chosen['title']} (${chosen['price_str']})")
                 current_total += chosen['price']
-            else: missing.append(item)
-        else: missing.append(f"{item} (No match)")
+            else:
+                missing.append(item)
+        else:
+            missing.append(f"{item} (No good match)")
+            
         progress_bar.progress((i + 1) / len(shopping_list))
 
     status_container.write("🚚 Initializing Checkout...")
@@ -352,6 +374,7 @@ async def checkout_node(state: AgentState): return {"messages": [SystemMessage(c
 
 st.set_page_config(page_title="Amazon Fresh Fetch", page_icon="🥕", layout="wide")
 
+# --- CSS for MEAL CARDS ---
 st.markdown("""
 <style>
     .meal-card {
@@ -388,6 +411,8 @@ app = st.session_state.graph_app
 with st.sidebar:
     st.header("⚙️ Settings")
     budget = st.number_input("Weekly Budget ($)", value=float(db.get_setting("budget", "200.0")), step=10.0)
+    
+    # --- EMPTY PANTRY DEFAULT ---
     pantry_val = db.get_setting("pantry", "")
     pantry = st.text_area("In Your Pantry", pantry_val)
     
@@ -399,16 +424,12 @@ with st.sidebar:
     st.divider()
     st.subheader("📜 History")
     
-    # --- DELETE BUTTON ---
     if st.button("🗑️ Clear History"):
         db.delete_all_plans()
-        st.session_state.pop('history_view', None) # Clear view if active
+        st.session_state.pop('history_view', None)
         st.rerun()
 
     past_plans = db.get_recent_plans()
-    if not past_plans:
-        st.caption("No history found.")
-        
     for p in past_plans:
         if st.button(f"{p['date']} - {len(p['list'])} items", key=f"hist_{p['id']}"):
             st.session_state.history_view = p
@@ -445,7 +466,7 @@ Return a VALID JSON object with exactly one key: "schedule".
 if "thread_id" not in st.session_state:
     st.session_state.thread_id = "streamlit_run_final"
 
-user_prompt = st.text_area("Meal Prompt", value=default_prompt, height=200)
+user_prompt = st.text_area("Meal Prompt", value=default_prompt, height=150)
 
 if st.button("📝 Generate Plan", type="primary"):
     config = {"configurable": {"thread_id": st.session_state.thread_id}}
@@ -501,6 +522,7 @@ def render_plan_ui(plan_json):
                         st.markdown(f"""<div class="meal-card"><div class="meal-header"><span class="icon">🥗</span> Lunch</div><div class="meal-body">{get_title(day_info.get('lunch'))}</div></div>""", unsafe_allow_html=True)
                     with c3:
                         st.markdown(f"""<div class="meal-card"><div class="meal-header"><span class="icon">🍳</span> Dinner</div><div class="meal-body">{get_title(day_info.get('dinner'))}</div></div>""", unsafe_allow_html=True)
+                    
                     with st.expander("👨‍🍳 View Cooking Instructions"):
                         st.json(day_info)
     except Exception as e:
@@ -508,25 +530,24 @@ def render_plan_ui(plan_json):
 
 # --- CHECK VIEW MODE (HISTORY vs NEW) ---
 if 'history_view' in st.session_state:
+    # HISTORY VIEW
     h_data = st.session_state.history_view
     st.info(f"📂 Viewing Past Plan from: **{h_data['date']}**")
     if st.button("⬅️ Back to New Plan"):
         del st.session_state.history_view
         st.rerun()
-        
     render_plan_ui(h_data['json'])
     st.divider()
     st.subheader("🛒 Historic Shopping List")
     st.dataframe(h_data['list'])
 
-# === REVIEW PHASE (NEW PLAN) ===
+# --- REVIEW PHASE (NEW PLAN) ---
 elif current_step == "shopper":
     st.divider()
     data = snapshot.values
-    
     render_plan_ui(data['meal_plan_json'])
 
-    # 3. SHOPPING LIST
+    # SHOPPING LIST
     st.divider()
     c_head, c_pdf = st.columns([3, 1])
     with c_head: st.subheader("🛒 Confirm Ingredients")
@@ -539,20 +560,18 @@ elif current_step == "shopper":
     with c_pdf:
         try:
             pdf_bytes = generate_pdf(data['meal_plan_json'], final_list)
-            st.download_button("📄 PDF", data=pdf_bytes, file_name="plan.pdf", mime="application/pdf", use_container_width=True)
+            st.download_button("📄 Download PDF Plan", data=pdf_bytes, file_name="plan.pdf", mime="application/pdf", use_container_width=True)
         except: st.error("PDF Error")
     
     if st.button(f"✅ Shop for {len(final_list)} Items", type="primary"):
-        # Save to DB History
         db.save_plan(user_prompt, data['meal_plan_json'], final_list)
-        
         app.update_state(config, {"shopping_list": final_list})
         async def resume():
             async for event in app.astream(None, config): pass
         asyncio.run(resume())
         st.rerun()
 
-# === HANDOFF PHASE ===
+# --- HANDOFF PHASE ---
 elif current_step == "checkout":
     st.divider()
     st.subheader("🛑 Automation Complete")
