@@ -255,7 +255,7 @@ def generate_pdf(meal_json_str: str, shopping_list: List[str]) -> bytes:
 
 async def planner_node(state: AgentState):
     with st.status("🧠 Planner: Designing Schedule & Analyzing Nutrition...", expanded=True) as status:
-        llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0.7, google_api_key=os.getenv("GOOGLE_API_KEY"))
+        llm = ChatGoogleGenerativeAI(model="gemini-2.5-pro", temperature=0.7, google_api_key=os.getenv("GOOGLE_API_KEY"))
         
         # --- MEAL PLANNER PROMPT ---
         prompt = ChatPromptTemplate.from_messages([
@@ -287,7 +287,7 @@ async def planner_node(state: AgentState):
 
 async def extractor_node(state: AgentState):
     with st.status("📑 Extractor: Building Shopping List...", expanded=True) as status:
-        llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0, google_api_key=os.getenv("GOOGLE_API_KEY"))
+        llm = ChatGoogleGenerativeAI(model="gemini-2.5-pro", temperature=0, google_api_key=os.getenv("GOOGLE_API_KEY"))
         
         # --- SHOPPING LIST EXTRACTOR PROMPT ---
         prompt = ChatPromptTemplate.from_messages([
