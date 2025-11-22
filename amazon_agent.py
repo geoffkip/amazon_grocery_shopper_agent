@@ -72,6 +72,19 @@ class DBManager:
         c.execute("DELETE FROM meal_plans")
         self.conn.commit()
 
+    # --- PREFERENCE LEARNING ---
+    def get_all_past_items(self):
+        c = self.conn.cursor()
+        c.execute("SELECT shopping_list FROM meal_plans")
+        rows = c.fetchall()
+        all_items = set()
+        for r in rows:
+            try:
+                items = json.loads(r[0])
+                for i in items: all_items.add(i.strip())
+            except: pass
+        return ", ".join(list(all_items))
+
 db = DBManager()
 
 # ==========================================
@@ -120,9 +133,8 @@ class AmazonFreshBrowser:
         except: pass
         st.success("✅ Browser Ready")
 
-    # --- SMART SHOPPER LOGIC ---
-    async def search_and_get_options(self, item_name: str) -> List[Dict]:
-        """Scrapes top 3 results for LLM decision making"""
+    # --- BRUTE FORCE ADD ---
+    async def search_and_add(self, item_name: str) -> dict:
         try:
             search_box = self.page.locator('input[id="twotabsearchtextbox"]')
             await search_box.clear()
@@ -131,17 +143,49 @@ class AmazonFreshBrowser:
             try: await self.page.wait_for_selector('div[data-component-type="s-search-result"]', timeout=3000)
             except: pass
 
-            # Get first 3 results
+            results = await self.page.locator('div[data-component-type="s-search-result"]').all()
+            if not results: return {"status": "NOT_FOUND", "price": 0.0}
+            target_card = results[0]
+
+            price = 0.0
+            try:
+                price_el = target_card.locator(".a-price .a-offscreen").first
+                if await price_el.count() > 0:
+                    txt = await price_el.text_content()
+                    price = float(txt.replace("$", "").replace(",", "").strip())
+            except: pass
+
+            btn = target_card.get_by_role("button", name="Add to cart")
+            if await btn.count() == 0: btn = target_card.locator("button[name='submit.addToCart']")
+            if await btn.count() == 0: btn = target_card.locator("input[name='submit.addToCart']")
+
+            if await btn.count() > 0 and await btn.first.is_visible():
+                await btn.first.click()
+                await asyncio.sleep(2)
+                return {"status": "ADDED", "price": price}
+            
+            return {"status": "NOT_FOUND", "price": 0.0}
+        except Exception as e:
+            return {"status": f"ERROR", "price": 0.0}
+
+    # --- SMART SHOPPER LOGIC ---
+    async def search_and_get_options(self, item_name: str) -> List[Dict]:
+        try:
+            search_box = self.page.locator('input[id="twotabsearchtextbox"]')
+            await search_box.clear()
+            await search_box.fill(item_name)
+            await search_box.press('Enter')
+            try: await self.page.wait_for_selector('div[data-component-type="s-search-result"]', timeout=3000)
+            except: pass
+
             results = await self.page.locator('div[data-component-type="s-search-result"]').all()
             options = []
-            
-            for i, res in enumerate(results[:3]): # Top 3 only
+            for i, res in enumerate(results[:3]): 
                 try:
                     title = await res.locator("h2").first.text_content()
                     price_text = "0.00"
                     if await res.locator(".a-price .a-offscreen").count() > 0:
                         price_text = await res.locator(".a-price .a-offscreen").first.text_content()
-                    
                     options.append({
                         "index": i,
                         "title": title.strip(),
@@ -149,25 +193,25 @@ class AmazonFreshBrowser:
                         "price": float(price_text.replace("$", "").replace(",", "").strip()) if "$" in price_text else 0.0
                     })
                 except: continue
-            
             return options
         except: return []
 
     async def add_specific_item(self, index: int) -> bool:
-        """Clicks 'Add' on the Nth item in the search results"""
         try:
             results = await self.page.locator('div[data-component-type="s-search-result"]').all()
             if index >= len(results): return False
-            
             target = results[index]
             
             btn = target.get_by_role("button", name="Add to cart")
             if await btn.count() == 0: btn = target.locator("button[name='submit.addToCart']")
+            if await btn.count() == 0: btn = target.locator("input[name='submit.addToCart']")
             
             if await btn.count() > 0:
-                await btn.first.click()
-                await asyncio.sleep(1)
-                return True
+                await btn.first.scroll_into_view_if_needed()
+                if await btn.first.is_visible():
+                    await btn.first.click()
+                    await asyncio.sleep(1)
+                    return True
             return False
         except: return False
 
@@ -181,10 +225,13 @@ class AmazonFreshBrowser:
             if await fresh_btn.count() > 0:
                 await fresh_btn.click()
                 return True
-            # Fallbacks
             proceed_btn = self.page.locator("input[name='proceedToALMCheckout-QW1hem9uIEZyZXNo']")
             if await proceed_btn.count() > 0:
                 await proceed_btn.click()
+                return True
+            fallback = self.page.get_by_role("button", name="Proceed to checkout")
+            if await fallback.count() > 0:
+                await fallback.click()
                 return True
         except: return False
         return False
@@ -210,7 +257,6 @@ def generate_pdf(meal_json_str: str, shopping_list: List[str]) -> bytes:
     pdf = MealPlanPDF()
     pdf.add_page()
     
-    # Shopping List
     pdf.set_font('Arial', 'B', 14)
     pdf.cell(0, 10, 'Master Shopping List', 0, 1, 'L')
     pdf.set_font('Arial', '', 10)
@@ -223,25 +269,21 @@ def generate_pdf(meal_json_str: str, shopping_list: List[str]) -> bytes:
         else: pdf.ln(7)
     pdf.ln(10)
 
-    # Recipes
     try:
         data = json.loads(meal_json_str)
         schedule = data.get("schedule", [])
         for day in schedule:
             pdf.add_page()
             pdf.set_font('Arial', 'B', 16)
-            # --- RED DAY HEADERS ---
             pdf.set_text_color(255, 75, 75)
             pdf.cell(0, 10, pdf.clean_text(day['day']), 0, 1, 'L')
             pdf.set_text_color(0, 0, 0)
-            
             for meal_type in ['breakfast', 'lunch', 'dinner']:
                 meal_data = day.get(meal_type)
                 if isinstance(meal_data, dict):
                     pdf.set_font('Arial', 'B', 12)
                     pdf.set_fill_color(240, 240, 240)
                     pdf.cell(0, 8, f"{meal_type.title()}: {pdf.clean_text(meal_data.get('title', ''))}", 0, 1, 'L', fill=True)
-                    
                     pdf.set_font('Arial', '', 10)
                     pdf.multi_cell(0, 5, f"Ing: {pdf.clean_text(meal_data.get('ingredients', ''))}")
                     pdf.multi_cell(0, 5, f"Steps: {pdf.clean_text(meal_data.get('instructions', ''))}")
@@ -250,14 +292,14 @@ def generate_pdf(meal_json_str: str, shopping_list: List[str]) -> bytes:
     return pdf.output(dest='S').encode('latin-1')
 
 # ==========================================
-# 4. NODES (Smart + Nutrition)
+# 4. NODES
 # ==========================================
 
 async def planner_node(state: AgentState):
     with st.status("🧠 Planner: Designing Schedule & Analyzing Nutrition...", expanded=True) as status:
+        # Gemini 2.5 Pro with higher temperature for a bit of creativity
         llm = ChatGoogleGenerativeAI(model="gemini-2.5-pro", temperature=0.7, google_api_key=os.getenv("GOOGLE_API_KEY"))
-        
-        # --- MEAL PLANNER PROMPT ---
+        # Meal Planner Prompt
         prompt = ChatPromptTemplate.from_messages([
             ("system", """You are a professional chef. Create a JSON object with ONE key: "schedule".
             The "schedule" is an array of objects. Each object represents a DAY and must have:
@@ -289,23 +331,34 @@ async def extractor_node(state: AgentState):
     with st.status("📑 Extractor: Building Shopping List...", expanded=True) as status:
         llm = ChatGoogleGenerativeAI(model="gemini-2.5-pro", temperature=0, google_api_key=os.getenv("GOOGLE_API_KEY"))
         
-        # --- SHOPPING LIST EXTRACTOR PROMPT ---
+        past_buys = db.get_all_past_items()
+        # Shopping List Extractor Prompt
         prompt = ChatPromptTemplate.from_messages([
             ("system", """You are a rigorous shopping list compiler.
             1. Read the provided JSON meal plan.
             2. Extract the 'ingredients' string from EVERY meal.
             3. Consolidate items by summing up quantities where possible (e.g., "2 eggs" + "2 eggs" = "4 Eggs").
             4. Compare against PANTRY: {pantry}. Remove any matches.
-            5. STRICT OUTPUT RULE: Return ONLY a comma-separated list of items. Do not speak. Do not add introduction text.
+            5. Check HISTORY below. If a generic item (e.g. "Peanut Butter") matches a brand in history (e.g. "Smuckers"), use the specific one.
+            6. STRICT OUTPUT RULE: Return ONLY a comma-separated list of items. Do not speak. Do not add introduction text.
+            
+            HISTORY: {history}
             """),
             ("human", "{input}")
         ])
         
         response = await (prompt | llm).ainvoke({
             "input": state["meal_plan_json"], 
-            "pantry": state.get("pantry_items", "")
+            "pantry": state.get("pantry_items", ""),
+            "history": past_buys
         })
-        items = [i.strip() for i in response.content.split(',')]
+        
+        raw_list = response.content.split(',')
+        items = []
+        for i in raw_list:
+            clean = re.sub(r'\s+', ' ', i).strip()
+            if clean: items.append(clean)
+            
         status.write(f"Identified {len(items)} items.")
     return {"shopping_list": items}
 
@@ -314,7 +367,7 @@ async def shopper_node(state: AgentState):
     current_total = state.get("total_cost", 0.0)
     limit = state.get("budget_limit", 200.0)
     cart, missing = [], []
-    
+    # Gemini Flash for shopping
     llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0, google_api_key=os.getenv("GOOGLE_API_KEY"))
     browser_tool = st.session_state.browser_tool
     
@@ -328,24 +381,19 @@ async def shopper_node(state: AgentState):
             missing.append(f"{item} (Budget Cut)")
             continue
         
-        # --- SMART SHOPPER LOGIC ---
         options = await browser_tool.search_and_get_options(item)
         
         if not options:
             missing.append(item)
             continue
             
-        # Ask LLM to pick best value
-        choice_prompt = f"User wants '{item}'. Available Options:\n"
-        for opt in options:
-            choice_prompt += f"Index {opt['index']}: {opt['title']} - ${opt['price_str']}\n"
-        choice_prompt += "Return ONLY the Index integer (0, 1, or 2) of the best match/value. If none match well, return -1."
+        choice_prompt = f"User wants '{item}'. Options:\n"
+        for opt in options: choice_prompt += f"Index {opt['index']}: {opt['title']} - ${opt['price_str']}\n"
+        choice_prompt += "Return ONLY the Index integer (0, 1, or 2) of the best match/value."
         
         decision_msg = await llm.ainvoke([HumanMessage(content=choice_prompt)])
-        try:
-            choice_idx = int(re.search(r'-?\d+', decision_msg.content).group())
-        except:
-            choice_idx = 0 # Default to first if LLM fails
+        try: choice_idx = int(re.search(r'-?\d+', decision_msg.content).group())
+        except: choice_idx = 0
             
         if choice_idx >= 0 and choice_idx < len(options):
             chosen = options[choice_idx]
@@ -354,7 +402,13 @@ async def shopper_node(state: AgentState):
                 cart.append(f"{chosen['title']} (${chosen['price_str']})")
                 current_total += chosen['price']
             else:
-                missing.append(item)
+                st.toast(f"Smart add failed for {item}. Retrying...")
+                bf_result = await browser_tool.search_and_add(item)
+                if bf_result["status"] == "ADDED":
+                    cart.append(f"{item} (${bf_result['price']:.2f})")
+                    current_total += bf_result["price"]
+                else:
+                    missing.append(item)
         else:
             missing.append(f"{item} (No good match)")
             
@@ -374,7 +428,6 @@ async def checkout_node(state: AgentState): return {"messages": [SystemMessage(c
 
 st.set_page_config(page_title="Amazon Fresh Fetch", page_icon="🥕", layout="wide")
 
-# --- CSS for MEAL CARDS ---
 st.markdown("""
 <style>
     .meal-card {
@@ -411,8 +464,6 @@ app = st.session_state.graph_app
 with st.sidebar:
     st.header("⚙️ Settings")
     budget = st.number_input("Weekly Budget ($)", value=float(db.get_setting("budget", "200.0")), step=10.0)
-    
-    # --- EMPTY PANTRY DEFAULT ---
     pantry_val = db.get_setting("pantry", "")
     pantry = st.text_area("In Your Pantry", pantry_val)
     
@@ -437,7 +488,7 @@ with st.sidebar:
 
 st.title("🥕 Amazon Fresh Fetch AI Agent")
 
-# --- MEAL PLANNER PROMPT ---
+# --- WEEKLY MEAL PLAN PROMPT ---
 default_prompt = """You are a world-class nutritionist and meal planning expert. Create a tailored Monday-Friday meal plan (Breakfast, Lunch, Dinner) for 2 adults.
 
 **CORE CONSTRAINTS:**
@@ -494,7 +545,6 @@ def render_plan_ui(plan_json):
         plan_data = json.loads(plan_json)
         schedule = plan_data.get('schedule', [])
         if schedule:
-            # NUTRITION
             nutri_data = []
             for day in schedule:
                 n = day.get('nutrition', {})
@@ -509,7 +559,6 @@ def render_plan_ui(plan_json):
                 with c1: st.bar_chart(df_nutri.set_index("Day")["Calories"], color="#ff4b4b")
                 with c2: st.bar_chart(df_nutri.set_index("Day")[["Protein", "Carbs", "Fat"]])
 
-            # MEAL TABS
             st.subheader("📅 Weekly Plan")
             tabs = st.tabs([day['day'] for day in schedule])
             for tab, day_info in zip(tabs, schedule):
@@ -530,7 +579,6 @@ def render_plan_ui(plan_json):
 
 # --- CHECK VIEW MODE (HISTORY vs NEW) ---
 if 'history_view' in st.session_state:
-    # HISTORY VIEW
     h_data = st.session_state.history_view
     st.info(f"📂 Viewing Past Plan from: **{h_data['date']}**")
     if st.button("⬅️ Back to New Plan"):
@@ -547,7 +595,6 @@ elif current_step == "shopper":
     data = snapshot.values
     render_plan_ui(data['meal_plan_json'])
 
-    # SHOPPING LIST
     st.divider()
     c_head, c_pdf = st.columns([3, 1])
     with c_head: st.subheader("🛒 Confirm Ingredients")
@@ -555,7 +602,6 @@ elif current_step == "shopper":
     raw_list = data.get('shopping_list', [])
     df = pd.DataFrame({"Item": raw_list, "Buy": [True]*len(raw_list)})
     
-    # --- FIXED: REPLACED use_container_width WITH width ---
     edited_df = st.data_editor(df, num_rows="dynamic", width="stretch")
     final_list = edited_df[edited_df["Buy"] == True]["Item"].tolist()
 
@@ -567,14 +613,12 @@ elif current_step == "shopper":
                 data=pdf_bytes,
                 file_name="plan.pdf",
                 mime="application/pdf",
-                use_container_width=True # Streamlit default still uses this for now
+                use_container_width=True 
             )
         except: st.error("PDF Error")
     
     if st.button(f"✅ Shop for {len(final_list)} Items", type="primary"):
-        # Save to DB History
         db.save_plan(user_prompt, data['meal_plan_json'], final_list)
-        
         app.update_state(config, {"shopping_list": final_list})
         async def resume():
             async for event in app.astream(None, config): pass
@@ -589,8 +633,27 @@ elif current_step == "checkout":
     c1, c2, c3 = st.columns(3)
     c1.metric("Total", f"${data['total_cost']:.2f}")
     c2.metric("Budget", f"${data['budget_limit']:.2f}")
-    c3.metric("Cart", len(data.get('cart_items', [])))
     
-    st.dataframe(data.get('cart_items', []))
+    cart_c = len(data.get('cart_items', []))
+    miss_c = len(data.get('missing_items', []))
+    total = cart_c + miss_c
+    rate = int((cart_c/total)*100) if total > 0 else 0
+    c3.metric("Success Rate", f"{rate}%")
+
+    col_a, col_b = st.columns(2)
+    with col_a:
+        st.success(f"✅ **Added ({cart_c})**")
+        if cart_c > 0:
+            st.dataframe(pd.DataFrame(data.get('cart_items', []), columns=["Item"]), width="stretch", hide_index=True)
+        else: st.write("None.")
+
+    with col_b:
+        st.error(f"❌ **Missed ({miss_c})**")
+        if miss_c > 0:
+            st.warning("⚠️ Check these manually.")
+            st.dataframe(pd.DataFrame(data.get('missing_items', []), columns=["Item"]), width="stretch", hide_index=True)
+        else: st.write("None.")
+
+    st.divider()
     st.info("👋 **Manual Handoff:** Please complete payment in the open browser window.")
     if st.button("Close"): asyncio.run(st.session_state.browser_tool.close())
