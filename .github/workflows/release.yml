@@ -1,0 +1,71 @@
+name: Create Release
+
+on:
+  push:
+    tags:
+      - 'v*'  # Triggers on version tags like v1.0.0
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Create release package
+        run: |
+          # Create release directory
+          mkdir -p release/amazon-fresh-fetch
+          
+          # Copy application files
+          cp -r *.py release/amazon-fresh-fetch/
+          cp requirements.txt release/amazon-fresh-fetch/
+          cp config.py release/amazon-fresh-fetch/
+          
+          # Copy installer scripts
+          cp install.sh release/amazon-fresh-fetch/
+          cp launch.sh release/amazon-fresh-fetch/
+          cp install.bat release/amazon-fresh-fetch/
+          cp launch.bat release/amazon-fresh-fetch/
+          cp README_INSTALLATION.md release/amazon-fresh-fetch/
+          
+          # Make scripts executable
+          chmod +x release/amazon-fresh-fetch/install.sh
+          chmod +x release/amazon-fresh-fetch/launch.sh
+          
+          # Create ZIP file
+          cd release
+          zip -r ../amazon-fresh-fetch.zip amazon-fresh-fetch/
+          cd ..
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: amazon-fresh-fetch.zip
+          body: |
+            ## Amazon Fresh Fetch ${{ github.ref_name }}
+            
+            ### 📦 Installation
+            
+            1. Download `amazon-fresh-fetch.zip`
+            2. Extract the ZIP file
+            3. Follow instructions in `README_INSTALLATION.md`
+            
+            ### 🍎 macOS/Linux
+            - Run `./install.sh` to install
+            - Run `./launch.sh` to launch the app
+            
+            ### 🪟 Windows
+            - Double-click `install.bat` to install
+            - Double-click `launch.bat` to launch the app
+            
+            ### 🔑 Requirements
+            - Python 3.8 or higher
+            - Google API Key (https://makersuite.google.com/app/apikey)
+            
+            ### ✨ What's New
+            - See commit history for details
+            
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
