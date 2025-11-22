@@ -229,7 +229,7 @@ async def planner_node(state: AgentState):
     with st.status("🧠 Planner: Designing Schedule...", expanded=True) as status:
         llm = ChatGoogleGenerativeAI(model="gemini-2.5-pro", temperature=1.0, google_api_key=os.getenv("GOOGLE_API_KEY"))
         
-        # --- CLEANED PROMPT (No Delivery Window request) ---
+        # --- MEAL PLANNER PROMPT ---
         prompt = ChatPromptTemplate.from_messages([
             ("system", """You are a professional chef and nutritionist. 
             Create a JSON object with exactly ONE key: "schedule".
