@@ -137,7 +137,7 @@ The script will install everything and launch the app. You can run it again anyt
 ### Running the Application
 
 ```bash
-streamlit run amazon_agent.py
+streamlit run amazon_fresh_fetch.py
 ```
 
 The application will open in your default browser (typically at `http://localhost:8501` or `http://localhost:8503`)
@@ -206,14 +206,25 @@ The agent will:
 
 ```
 amazon_agent/
-├── amazon_agent.py          # Main application file with LangGraph workflow
-├── amazon_session.json       # Browser session storage (gitignored)
+├── amazon_fresh_fetch.py    # Main application entry point (UI & Orchestration)
+├── workflow.py              # LangGraph workflow definition
+├── agent.py                 # Agent nodes and logic
+├── browser.py               # Browser automation logic
+├── database.py              # Database interactions
+├── prompts.py               # Centralized AI prompts
+├── ui.py                    # UI components and styles
+├── utils.py                 # Utility functions
+├── config.py                # Configuration settings
+├── pdf_generator.py         # PDF generation logic
+├── amazon_session.json      # Browser session storage (gitignored)
 ├── agent_data.db            # SQLite database for meal plans & settings (gitignored)
-├── .env                      # Environment variables (gitignored)
+├── .env                     # Environment variables (gitignored)
 ├── .gitignore               # Git ignore rules
 ├── requirements.txt         # Python dependencies
 ├── user_session/            # Chrome browser session data (gitignored)
-└── README.md               # This file
+├── mac/                     # Mac installer scripts
+├── windows/                 # Windows installer scripts
+└── README.md                # This file
 ```
 
 ## 🔒 Security & Privacy
