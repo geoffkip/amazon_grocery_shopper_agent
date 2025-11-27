@@ -24,6 +24,8 @@
 - 📊 **Nutritional Analysis**: Visual charts showing daily calories, protein, carbs, and fat breakdowns
 - 📄 **PDF Export**: Generate downloadable meal plan PDFs with shopping lists and recipe instructions
 - 💾 **History & Persistence**: SQLite database stores meal plans, shopping lists, and settings for easy review
+- 🔄 **One-Click Reordering**: Easily reload past meal plans to shop for them again
+- 🗑️ **Granular History Control**: Delete individual meal plans or clear entire history
 - 🎯 **Customizable Preferences**: Set dietary restrictions, pantry items, and budget constraints
 - 🍪 **Session Persistence**: Save browser sessions to avoid repeated logins
 - 🎨 **Interactive UI**: Beautiful Streamlit interface with real-time progress tracking, meal cards, and tabbed weekly views
@@ -85,19 +87,7 @@ User Input → Planner → Extractor → Shopper → Human Review → Checkout
 
 ### Installation
 
-#### Option 1: One-Click Installers (Recommended)
-
-We provide simple scripts to automatically install dependencies and run the app.
-
-1.  **Download the project** (or git clone).
-2.  **Run the installer for your OS**:
-    *   **Windows**: Double-click `windows/run_app.bat`.
-    *   **Mac**: Double-click `mac/run_app.command`.
-        *   *Note: If you see a security warning on Mac, right-click the file and select "Open".*
-
-The script will install everything and launch the app. You can run it again anytime to start the app.
-
-#### Option 2: Manual Installation (For Developers)
+#### Option 1: Manual Installation (Recommended)
 
 1.  **Clone the repository**
     ```bash
@@ -133,6 +123,22 @@ The script will install everything and launch the app. You can run it again anyt
     Get your Google API key from [Google AI Studio](https://makersuite.google.com/app/apikey)
 
     Note: The first time you run the app, you'll need to manually log in to Amazon in the browser window that opens. Your session will be saved for future runs.
+
+#### Option 2: Standalone Executable (Alternative)
+
+If you prefer a single file executable or want to distribute the app:
+
+> **Note**: You must run the build script on the same operating system you are building for (e.g., run on Windows to build a `.exe`, run on Mac to build a Mac app).
+
+1.  **Build the executable** (requires Python installed once for the build):
+    ```bash
+    pip install -r requirements.txt
+    python build_executable.py
+    ```
+2.  **Run the app**:
+    - Go to the `dist/` folder.
+    - Double-click `AmazonFreshAgent` (Mac) or `AmazonFreshAgent.exe` (Windows).
+    - You can move this single file anywhere on your computer.
 
 ### Running the Application
 
@@ -189,6 +195,13 @@ The agent will:
 - The browser will automatically navigate to checkout with multiple fallback strategies
 - Complete payment, delivery time, and final order confirmation manually in the browser window
 
+### 6. History Management
+
+- **View Past Plans**: Click on any date in the "History" sidebar to view that meal plan.
+- **Download PDF**: When viewing a past plan, click "📄 Download PDF Plan" to get a copy.
+- **Reorder**: Click "🔄 Reorder" to load a past plan back into the main view and shop for it again.
+- **Delete**: Click the trash icon (🗑️) next to a specific plan to remove it, or use "Clear History" to remove everything.
+
 ## 🛠️ Technology Stack
 
 - **Streamlit**: Web UI framework with interactive components
@@ -222,8 +235,8 @@ amazon_agent/
 ├── .gitignore               # Git ignore rules
 ├── requirements.txt         # Python dependencies
 ├── user_session/            # Chrome browser session data (gitignored)
-├── mac/                     # Mac installer scripts
-├── windows/                 # Windows installer scripts
+├── packaging/               # PyInstaller packaging scripts
+├── build_executable.py      # Script to build standalone executable
 └── README.md                # This file
 ```
 

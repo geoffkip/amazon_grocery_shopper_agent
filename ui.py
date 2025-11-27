@@ -19,6 +19,10 @@ STREAMLIT_STYLE = """
     }
     .meal-body { font-size: 1rem; color: #4f4f4f; line-height: 1.5; }
     .icon { margin-right: 8px; }
+    [data-testid="stSidebar"] {
+        min-width: 250px;
+        max-width: 500px;
+    }
 </style>
 """
 

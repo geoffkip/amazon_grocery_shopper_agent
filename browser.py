@@ -45,9 +45,34 @@ class AmazonFreshBrowser:
             return
         st.toast("🚀 Launching Browser...")
         self.playwright = await async_playwright().start()
-        self.browser = await self.playwright.chromium.launch(
-            headless=False, slow_mo=1000
-        )
+        st.toast("🚀 Launching Browser...")
+        self.playwright = await async_playwright().start()
+        
+        try:
+            self.browser = await self.playwright.chromium.launch(
+                headless=False, slow_mo=1000
+            )
+        except Exception as e:
+            if "Executable doesn't exist" in str(e):
+                st.warning("⚠️ Browser not found. Installing Chromium... This may take a minute.")
+                import subprocess
+                import sys
+                
+                # Install chromium
+                try:
+                    # Try installing via the python module
+                    subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"], check=True)
+                    st.success("✅ Browser installed! Retrying launch...")
+                    
+                    # Retry launch
+                    self.browser = await self.playwright.chromium.launch(
+                        headless=False, slow_mo=1000
+                    )
+                except Exception as install_error:
+                    st.error(f"❌ Failed to install browser: {install_error}")
+                    raise e
+            else:
+                raise e
 
         if os.path.exists(self.session_file):
             self.context = await self.browser.new_context(

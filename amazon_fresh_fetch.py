@@ -106,9 +106,17 @@ with st.sidebar:
 
     past_plans = db.get_recent_plans()
     for p in past_plans:
-        if st.button(f"{p['date']} - {len(p['list'])} items", key=f"hist_{p['id']}"):
-            st.session_state.history_view = p
-            st.rerun()
+        col1, col2 = st.columns([4, 1])
+        with col1:
+            if st.button(f"{p['date']} - {len(p['list'])} items", key=f"hist_{p['id']}"):
+                st.session_state.history_view = p
+                st.rerun()
+        with col2:
+            if st.button("🗑️", key=f"del_{p['id']}", help="Delete this plan"):
+                db.delete_plan(p['id'])
+                if "history_view" in st.session_state and st.session_state.history_view['id'] == p['id']:
+                    del st.session_state.history_view
+                st.rerun()
 
 st.title(f"{PAGE_ICON} {PAGE_TITLE} AI Agent")
 
@@ -140,7 +148,14 @@ if st.button("📝 Generate Plan", type="primary"):
 config = {"configurable": {"thread_id": st.session_state.thread_id}}
 try:
     snapshot = app.get_state(config)
-    current_step = snapshot.next[0] if snapshot.next else None
+    # Check for manual override (used for Reorder)
+    if "manual_step_override" in st.session_state:
+        current_step = st.session_state.pop("manual_step_override")
+    else:
+        current_step = snapshot.next[0] if snapshot.next else None
+except Exception:
+    current_step = None
+
 except Exception:
     current_step = None
 
@@ -155,6 +170,51 @@ if "history_view" in st.session_state:
     render_plan_ui(h_data["json"])
     st.divider()
     st.subheader("🛒 Historic Shopping List")
+    
+    try:
+        pdf_bytes = generate_pdf(h_data["json"], h_data["list"])
+        st.download_button(
+            label="📄 Download PDF Plan",
+            data=pdf_bytes,
+            file_name=f"plan_{h_data['date'].replace(' ', '_').replace(':', '-')}.pdf",
+            mime="application/pdf",
+            use_container_width=True,
+        )
+    except Exception as e:
+        st.error(f"PDF Error: {e}")
+
+    col_h1, col_h2 = st.columns([1, 4])
+    with col_h1:
+        if st.button("🔄 Reorder", type="primary", help="Load this plan to shop again"):
+            # 1. Create a NEW thread ID to start fresh
+            import uuid
+            new_thread_id = f"reorder_{uuid.uuid4().hex[:8]}"
+            st.session_state.thread_id = new_thread_id
+            
+            # 2. Inject state into this NEW thread
+            new_config = {"configurable": {"thread_id": new_thread_id}}
+            new_state = {
+                "meal_plan_json": h_data["json"],
+                "shopping_list": h_data["list"],
+                # Reset other fields
+                "cart_items": [],
+                "missing_items": [],
+                "total_cost": 0.0,
+                "budget_limit": budget, # Ensure budget is carried over
+                "messages": [HumanMessage(content=f"Reordering plan from {h_data['date']}")],
+            }
+            # Update state as if 'extractor' just finished
+            # This places the graph at the edge: extractor -> shopper
+            # Since interrupt_before=["shopper"], it should pause there.
+            app.update_state(new_config, new_state, as_node="extractor")
+            
+            # Force the UI to show the shopper step on next run
+            st.session_state.manual_step_override = "shopper"
+            
+            # 3. Clear history view to show the main workflow
+            del st.session_state.history_view
+            st.rerun()
+
     st.dataframe(h_data["list"])
 
 # --- REVIEW PHASE (NEW PLAN) ---
@@ -189,16 +249,24 @@ elif current_step == "shopper":
 
     if st.button(f"✅ Shop for {len(final_list)} Items", type="primary"):
         db.save_plan(user_prompt, data["meal_plan_json"], final_list)
-        app.update_state(config, {"shopping_list": final_list})
+        # Reinforce that we are at the end of extractor, ready for shopper
+        app.update_state(config, {"shopping_list": final_list}, as_node="extractor")
 
         async def resume():
             """Resume the agent workflow from the current state."""
-            async for _ in app.astream(None, config):
+            # Force a None input to signal resumption
+            async for event in app.astream(None, config):
                 pass
 
-        asyncio.run(resume())
-        st.rerun()
-
+        try:
+            asyncio.run(resume())
+            # Clear the manual override so future runs follow the graph
+            if "manual_step_override" in st.session_state:
+                del st.session_state.manual_step_override
+            st.rerun()
+        except Exception as e:
+            st.error(f"Shopping Error: {e}")
+        
 # --- HANDOFF PHASE ===
 elif current_step == "checkout":
     st.divider()
@@ -206,7 +274,7 @@ elif current_step == "checkout":
     data = snapshot.values
     c1, c2, c3 = st.columns(3)
     c1.metric("Total", f"${data['total_cost']:.2f}")
-    c2.metric("Budget", f"${data['budget_limit']:.2f}")
+    c2.metric("Budget", f"${data.get('budget_limit', 0.0):.2f}")
 
     cart_c = len(data.get("cart_items", []))
     miss_c = len(data.get("missing_items", []))

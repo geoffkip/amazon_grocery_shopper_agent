@@ -64,7 +64,7 @@ async def planner_node(state: AgentState):
         # Gemini 2.5 Pro with higher temperature for a bit of creativity
         llm = ChatGoogleGenerativeAI(
             model=PLANNER_MODEL,
-            temperature=0.7,
+            temperature=2.0,
             google_api_key=os.getenv("GOOGLE_API_KEY"),
         )
         # Meal Planner Prompt

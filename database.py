@@ -125,6 +125,17 @@ class DBManager:
         c.execute("DELETE FROM meal_plans")
         self.conn.commit()
 
+    def delete_plan(self, plan_id):
+        """
+        Delete a specific meal plan by ID.
+
+        Args:
+            plan_id (int): The ID of the plan to delete.
+        """
+        c = self.conn.cursor()
+        c.execute("DELETE FROM meal_plans WHERE id=?", (plan_id,))
+        self.conn.commit()
+
     # --- PREFERENCE LEARNING ---
     def get_all_past_items(self):
         """
